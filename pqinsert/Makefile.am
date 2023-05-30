@@ -10,7 +10,7 @@ EXTRA_DIST 	= pqinsert.1.in pq_test_insert.txt
 CLEANFILES      = pqinsert.1 *.pq *.log
 PQ_SUBDIR	= @PQ_SUBDIR@
 
-bin_PROGRAMS	= pqinsert pq_test_insert
+bin_PROGRAMS	= pqinsert pq_test_insert test_pqinsert_stdin
 AM_CPPFLAGS	= \
     -I$(top_srcdir)/log \
     -I$(top_builddir)/protocol -I$(top_srcdir)/protocol \
@@ -22,6 +22,7 @@ AM_CPPFLAGS	= \
     -I$(top_srcdir)/mcast_lib/ldm7
 pqinsert_LDADD		= $(top_builddir)/lib/libldm.la
 pq_test_insert_LDADD	= $(pqinsert_LDADD)
+test_pqinsert_stdin_LDADD  = $(pqinsert_LDADD)
 TAGS_FILES	= \
     ../$(PQ_SUBDIR)/*.c ../$(PQ_SUBDIR)/*.h \
     ../protocol/*.c ../protocol/*.h \
@@ -36,7 +37,7 @@ pqinsert.1:	$(srcdir)/pqinsert.1.in
 	../regutil/substPaths <$? >$@.tmp
 	mv $@.tmp $@
 
-check-local:		pq_test_insert
+check-local:		pq_test_insert test_pqinsert_stdin
 # The "-c" (clobber) option is used to prevent `pq_test_insert` from exiting due
 # to a duplicate data-product from a previous invocation.
 	../pqcreate/pqcreate -c -s 2M -q pq_test_insert.pq
@@ -47,6 +48,8 @@ check-local:		pq_test_insert
 	../pqcreate/pqcreate -c -s 100k -S 100 -q pq_test_insert.pq
 	./pq_test_insert -q pq_test_insert.pq -m 2000 -n 1000 -g 0
 	rm pq_test_insert.pq
+# Verify the operation of `pqinsert` with a input from STDIN.
+	./test_pqinsert_stdin
 
 valgrind:		pq_test_insert
 # The "-c" (clobber) option is used to prevent `pq_test_insert` from exiting due
