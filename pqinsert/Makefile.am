@@ -49,7 +49,9 @@ check-local:		pq_test_insert test_pqinsert_stdin
 	./pq_test_insert -q pq_test_insert.pq -m 2000 -n 1000 -g 0
 	rm pq_test_insert.pq
 # Verify the operation of `pqinsert` with a input from STDIN.
+	../pqcreate/pqcreate -s 100k -S 100 -q test_pqinsert_stdin.pq
 	./test_pqinsert_stdin
+	rm test_pqinsert_stdin.pq
 
 valgrind:		pq_test_insert
 # The "-c" (clobber) option is used to prevent `pq_test_insert` from exiting due
