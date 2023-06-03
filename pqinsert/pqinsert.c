@@ -61,6 +61,10 @@ usage(
 {
     log_add(
 "Usage: %s [options] filename ...\n"
+"    Arguments:\n"
+"      If a filename is \"-\" it will be read from STDIN. The \"-p\" option \n"
+"      should be used in this case.\n"
+"    \n"
 "    Options:\n"
 "    -v            Verbose, tell me about each product\n"
 "    -l dest       Log to `dest`. One of: \"\" (system logging daemon), \"-\"\n"
@@ -182,6 +186,86 @@ mm_md5(MD5_CTX *md5ctxp, void *vp, size_t sz, signaturet signature)
         return 0;
 }
 #endif
+
+
+#if USE_MMAP
+/**
+ * Read contents of STDIN into memory.
+ *
+ * @param[out] size size of the returned buffer in bytes
+ * @return new data buffer or NULL on error
+ */
+void*
+mmap_stdin(u_int* size)
+{
+    // In the general case, STDIN is not guaranteed to work like a disk file,
+    // and cannot be used with mmap().
+    // <https://www.gnu.org/software/libc/manual/html_node/Memory_002dmapped-I_002fO.html>
+    size_t capacity = 1024;
+    void* buffer = malloc(capacity);
+    if (!buffer)
+    {
+        log_error("mmap_stdin: memory allocation failed");
+        return NULL;
+    }
+    *size = 0;
+    while (true)
+    {
+        // Continue until all input is consumed.
+        const size_t max_count = capacity - *size;
+        const size_t count = fread(&buffer[*size], 1, max_count, stdin);
+        *size += count;
+        if (count == capacity)
+        {
+            // Double the capacity of the buffer and continue reading.
+            capacity *= 2;
+            void* ptr = realloc(buffer, capacity);
+            if (!ptr)
+            {
+                free(buffer);
+                log_error("mmap_stdin: memory reallocation failed");
+                return NULL;
+            }
+            buffer = ptr;
+        }
+        else {
+            if (ferror(stdin))
+            {
+                free(buffer);
+                log_error("mmap_stdin: error reading from STDIN");
+                return NULL;
+            }
+            break;
+        }
+    }
+    if (capacity > *size)
+    {
+        // Trim the buffer to the required size.
+        void* ptr = realloc(buffer, *size);
+        if (!ptr)
+        {
+            free(buffer);
+            log_error("mmap_stdin: memory reallocation failed");
+            return NULL;
+        }
+        buffer = ptr;
+    }
+    return buffer;
+}
+
+/**
+ * Free the resources associated with a buffer created by mmap_stdin().
+ *
+ * @param[in,out] bufptr pointer to a data buffer
+ */
+void
+munmap_stdin(void** bufptr)
+{
+    free(*bufptr);
+    *bufptr = NULL;
+}
+
+#endif  // USE_MMAP
 
 
 int main(
@@ -346,21 +430,31 @@ int main(
                          av++, ac--, prod.info.seqno++)
         {
                 filename = *av;
-
-                fd = open(filename, O_RDONLY, 0);
-                if(fd == -1)
+                bool use_stdin = false;
+                if (strlen(filename) == 1 && strncmp(filename, "-", 1) == 0)
                 {
-                        log_syserr("open: %s", filename);
-                        exitCode = exit_infile;
-                        continue;
+                    filename = "STDIN";
+                    fd = fileno(stdin);
+                    use_stdin = true;
+                }
+                else
+                {
+                    fd = open(filename, O_RDONLY, 0);
                 }
 
-                if( fstat(fd, &statb) == -1) 
+                if (fd == -1)
                 {
-                        log_syserr("fstat: %s", filename);
-                        (void) close(fd);
-                        exitCode = exit_infile;
-                        continue;
+                    log_syserr("open: %s", filename);
+                    exitCode = exit_infile;
+                    continue;
+                }
+
+                if (fstat(fd, &statb) == -1)
+                {
+                    log_syserr("fstat: %s", filename);
+                    (void) close(fd);
+                    exitCode = exit_infile;
+                    continue;
                 }
 
                 /* Determine what to use for product identifier */
@@ -390,14 +484,27 @@ int main(
                 }
 
 #if USE_MMAP
-                prod.data = mmap(0, prod.info.sz,
-                        PROT_READ, MAP_PRIVATE, fd, 0);
-                if(prod.data == MAP_FAILED)
+                if (use_stdin)
                 {
+                    prod.data = mmap_stdin(&prod.info.sz);
+                    if (!prod.data)
+                    {
+                        log_syserr("mmap_stdin: %s", filename);
+                        exitCode = exit_system;
+                        continue;
+                    }
+                }
+                else
+                {
+                    prod.data = mmap(0, prod.info.sz,
+                                     PROT_READ, MAP_PRIVATE, fd, 0);
+                    if (prod.data == MAP_FAILED)
+                    {
                         log_syserr("mmap: %s", filename);
                         (void) close(fd);
                         exitCode = exit_infile;
                         continue;
+                    }
                 }
 
                 status = 
@@ -411,8 +518,15 @@ int main(
 
                 if (status != 0) {
                     log_syserr("mm_md5: %s", filename);
-                    (void) munmap(prod.data, prod.info.sz);
-                    (void) close(fd);
+                    if (use_stdin)
+                    {
+                        munmap_stdin(&prod.data);
+                    }
+                    else
+                    {
+                        (void) munmap(prod.data, prod.info.sz);
+                        (void) close(fd);
+                    }
                     exitCode = exit_infile;
                     continue;
                 }
@@ -466,7 +580,15 @@ int main(
                     break;
                 }
 
-                (void) munmap(prod.data, prod.info.sz);
+                if (use_stdin)
+                {
+                    munmap_stdin(&prod.data);
+                }
+                else
+                {
+                    (void) munmap(prod.data, prod.info.sz);
+                }
+
 #else // USE_MMAP above; !USE_MMAP below
                 status = 
                     signatureFromId

@@ -85,21 +85,8 @@ void teardown()
  * @return true on success
  */
 bool test_pqinsert() {
-    // For now, product needs to be written to a temporary file.
-    char tmp_path[MAXLEN];
-    snprintf(tmp_path, MAXLEN, "%s/test.tmp", tmpdir);
-    FILE* tmp_file = fopen(tmp_path, "wb");
-    if (!tmp_file) {
-        perror("test_pqinsert: cannot write tmp file");
-        exit(errno);
-    }
-    fwrite(product, sizeof(char), strlen(product), tmp_file);
-    fclose(tmp_file);
-
-    // Act as if `pqinsert` reads from STDIN, although for now it needs a
-    // physical file for input.
     char command[MAXLEN];
-    snprintf(command, MAXLEN, "./pqinsert -q %s -p test %s", queue, tmp_path);
+    snprintf(command, MAXLEN, "./pqinsert -q %s -p test %s", queue, "-");
     FILE* stream = popen(command, "w");
     if (!stream) {
         perror("test_pqinsert: could not execute pqinsert");
